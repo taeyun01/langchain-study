@@ -1,14 +1,19 @@
-import streamlit as st
+from langchain.prompts import ChatPromptTemplate
 from langchain.chat_models import ChatOpenAI
 from langchain.document_loaders import UnstructuredFileLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings, CacheBackedEmbeddings
+from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
 from langchain.vectorstores import FAISS
 from langchain.storage import LocalFileStore
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
+from langchain.chat_models import ChatOpenAI
+import streamlit as st
 
 st.set_page_config(page_title="DocumentGPT", page_icon="📝")
+
+llm = ChatOpenAI(temperature=0.1)
 
 st.title("DocumentGPT")
 
@@ -57,6 +62,23 @@ def paint_history():
             save=False,  # 이미 저장된 메시지이므로 다시 저장하지 않음
         )
 
+def format_docs(docs):
+    return "\n\n".join(document.page_content for document in docs)
+
+prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            """
+            Answer the question using ONLY the following context. If you don't know the answer just say you don't know. DON'T make anything up.
+            
+            Context: {context}
+            """,
+        ),
+        ("human", "{question}"),
+    ]
+)
+
 # 사이드바에 파일 업로더 배치
 with st.sidebar:
     file = st.file_uploader(".txt .pdf .docx 파일을 업로드 해주세요.", type=["txt", "pdf", "docx"])
@@ -69,7 +91,17 @@ if file:
     message = st.chat_input("질문을 입력하세요.") # 사용자 입력 받기
     if message:
         send_message(message, "user") # 사용자 메시지 표시 및 저장
-        send_message("테스트~~~~", "ai")
+        chain = (
+            {
+                "context": retriever | RunnableLambda(format_docs),
+                "question": RunnablePassthrough(),
+            }
+            | prompt
+            | llm
+        )
+        response = chain.invoke(message)
+        send_message(response.content, "AI")
+        
 # 파일이 업로드되지 않은 경우
 else:
     st.session_state["messages"] = [] # 대화 내역 초기화
